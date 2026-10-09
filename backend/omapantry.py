@@ -146,8 +146,9 @@ def icon_index():
                 best.setdefault(f.stem, (1, str(f)))
     out = {k: v[1] for k, v in best.items()}
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(out))
+        private_dir(CACHE_DIR)
+        with private_open(cache, os.O_WRONLY | os.O_TRUNC, "w") as fh:
+            fh.write(json.dumps(out))
     except OSError:
         pass
     return out
@@ -250,8 +251,31 @@ def read_usage():
     return stats
 
 
+def private_dir(path):
+    """Create `path` owner-only (0700); tighten it if it already exists."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+
+
+def private_open(path, flags, mode):
+    """Open `path` owner-only (0600), tightening an existing file's mode."""
+    fd = os.open(path, flags | os.O_CREAT, 0o600)
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, mode)
+
+
+def harden():
+    """Make all usage data and caches private, before anything is read or logged."""
+    for d in (DATA_DIR, CACHE_DIR):
+        if d.is_dir():
+            private_dir(d)
+            for f in d.iterdir():
+                if f.is_file() and not f.is_symlink():
+                    os.chmod(f, 0o600)
+
+
 def log_usage(app_id, src):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    private_dir(DATA_DIR)
     now = int(time.time())
     # Menu launch followed by the window appearing is one use, not two.
     try:
@@ -269,7 +293,7 @@ def log_usage(app_id, src):
                     break
     except OSError:
         pass
-    with open(USAGE, "a") as fh:
+    with private_open(USAGE, os.O_WRONLY | os.O_APPEND, "a") as fh:
         fh.write(json.dumps({"t": now, "id": app_id, "src": src}) + "\n")
 
 
@@ -414,8 +438,8 @@ def die_with_parent():
 
 def track():
     die_with_parent()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    lock = open(DATA_DIR / "tracker.lock", "w")
+    private_dir(DATA_DIR)
+    lock = private_open(DATA_DIR / "tracker.lock", os.O_WRONLY, "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -450,6 +474,7 @@ def track():
 
 
 def main():
+    harden()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "index"
     if cmd == "index":
         json.dump(build_index(), sys.stdout)
