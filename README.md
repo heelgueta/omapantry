@@ -1,5 +1,7 @@
 # omapantry
 
+![Omapantry panel](preview.png)
+
 A tiny start menu for the Omarchy bar. Click the apps icon (right after the Omarchy menu) to browse everything launchable: native apps, webapps and TUIs.
 
 **Views** (Tab / Shift+Tab, or ←/→ when the search box is empty): Recent · Top (most opened) · A–Z · New (install date) · Size · Groups (category) · Unused.
