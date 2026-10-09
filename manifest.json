@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "mnx.omastart",
+  "name": "Omastart",
+  "version": "0.1.0",
+  "author": "mnx",
+  "license": "MIT",
+  "description": "A tiny start menu: every installed app, webapp and TUI, sorted by recent use, frequency, name, install date, size, category or never-used",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Omastart",
+    "description": "Start-menu style app browser with recent / top / A-Z / newest / size / groups / unused views",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}

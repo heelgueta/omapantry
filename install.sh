@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Link omastart into the Omarchy shell and (by default) put it on the bar.
+#   ./install.sh               link + enable, placed right after the Omarchy menu
+#   ./install.sh --no-enable   link only; enable later with: omarchy plugin enable mnx.omastart
+set -euo pipefail
+repo="$(cd "$(dirname "$0")" && pwd)"
+id="mnx.omastart"
+dest="$HOME/.config/omarchy/plugins/$id"
+cfg="$HOME/.config/omarchy/shell.json"
+
+if [[ -e $dest && ! -L $dest ]]; then
+  echo "$dest exists and is not a symlink; refusing to touch it" >&2; exit 1
+fi
+
+# One-time safety copy of the bar config, so uninstall can always restore it.
+[[ -f $cfg && ! -f $cfg.pre-omastart ]] && cp "$cfg" "$cfg.pre-omastart"
+
+ln -sfn "$repo" "$dest"
+omarchy-shell shell rescanPlugins >/dev/null
+echo "linked $dest -> $repo"
+
+if [[ ${1:-} != "--no-enable" ]]; then
+  omarchy plugin enable "$id" --section left --after omarchy.menu
+  echo "enabled; click the apps icon on the bar"
+fi
