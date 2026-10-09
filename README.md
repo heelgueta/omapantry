@@ -15,7 +15,13 @@ omarchy plugin add https://github.com/heelgueta/omapantry.git --enable
 ```
 
 Or review it first: `omarchy plugin add <url>` clones it disabled, then `omarchy plugin enable heelgueta.omapantry`.
-Update with `omarchy plugin update heelgueta.omapantry`. Optional keybinding: `omarchy-shell heelgueta.omapantry toggle`.
+Update with `omarchy plugin update heelgueta.omapantry`; remove with `omarchy plugin remove heelgueta.omapantry`. Optional keybinding: `omarchy-shell heelgueta.omapantry toggle`.
+
+## Requirements
+
+Omarchy with Hyprland, Python 3 (standard library only), and tools Omarchy already ships: `pacman`
+(read-only queries), `gtk-launch`, `setsid`, `xdg-terminal-exec`, `omarchy-launch-webapp`.
+No sudo, no install hooks, no network access.
 
 ## Privacy
 
