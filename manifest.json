@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "mnx.omapantry",
+  "id": "heelgueta.omapantry",
   "name": "Omapantry",
   "version": "0.1.0",
-  "author": "mnx",
+  "author": "heelgueta",
   "license": "MIT",
   "description": "A tiny start menu: every installed app, webapp and TUI, sorted by recent use, frequency, name, install date, size, category or never-used",
   "kinds": [

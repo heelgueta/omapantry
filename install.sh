@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Link omapantry into the Omarchy shell and (by default) put it on the bar.
 #   ./install.sh               link + enable, placed right after the Omarchy menu
-#   ./install.sh --no-enable   link only; enable later with: omarchy plugin enable mnx.omapantry
+#   ./install.sh --no-enable   link only; enable later with: omarchy plugin enable heelgueta.omapantry
 set -euo pipefail
 repo="$(cd "$(dirname "$0")" && pwd)"
-id="mnx.omapantry"
+id="heelgueta.omapantry"
 dest="$HOME/.config/omarchy/plugins/$id"
 cfg="$HOME/.config/omarchy/shell.json"
 

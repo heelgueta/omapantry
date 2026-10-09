@@ -9,8 +9,8 @@ import qs.Commons
 // backend/omapantry.py; this file only renders it with the shell's theme tokens.
 Panel {
   id: root
-  moduleName: "mnx.omapantry"
-  ipcTarget: "mnx.omapantry"
+  moduleName: "heelgueta.omapantry"
+  ipcTarget: "heelgueta.omapantry"
   manageIpc: true
 
   // ---- theme ---------------------------------------------------------------

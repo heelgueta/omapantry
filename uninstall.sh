@@ -3,7 +3,7 @@
 #   ./uninstall.sh           keep your usage history (~/.local/share/omapantry)
 #   ./uninstall.sh --purge   also delete usage history and caches
 set -euo pipefail
-id="mnx.omapantry"
+id="heelgueta.omapantry"
 dest="$HOME/.config/omarchy/plugins/$id"
 
 omarchy plugin disable "$id" 2>/dev/null || true
