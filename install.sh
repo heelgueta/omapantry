@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Link omastart into the Omarchy shell and (by default) put it on the bar.
+# Link omapantry into the Omarchy shell and (by default) put it on the bar.
 #   ./install.sh               link + enable, placed right after the Omarchy menu
-#   ./install.sh --no-enable   link only; enable later with: omarchy plugin enable mnx.omastart
+#   ./install.sh --no-enable   link only; enable later with: omarchy plugin enable mnx.omapantry
 set -euo pipefail
 repo="$(cd "$(dirname "$0")" && pwd)"
-id="mnx.omastart"
+id="mnx.omapantry"
 dest="$HOME/.config/omarchy/plugins/$id"
 cfg="$HOME/.config/omarchy/shell.json"
 
@@ -13,7 +13,7 @@ if [[ -e $dest && ! -L $dest ]]; then
 fi
 
 # One-time safety copy of the bar config, so uninstall can always restore it.
-[[ -f $cfg && ! -f $cfg.pre-omastart ]] && cp "$cfg" "$cfg.pre-omastart"
+[[ -f $cfg && ! -f $cfg.pre-omapantry ]] && cp "$cfg" "$cfg.pre-omapantry"
 
 ln -sfn "$repo" "$dest"
 omarchy-shell shell rescanPlugins >/dev/null

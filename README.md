@@ -1,4 +1,4 @@
-# omastart
+# omapantry
 
 A tiny start menu for the Omarchy bar. Click the apps icon (right after the Omarchy menu) to browse everything launchable: native apps, webapps and TUIs.
 
@@ -10,8 +10,8 @@ Colors, borders, fonts and corner radius all come from the shell's theme tokens,
 
 ## How it works
 
-- `backend/omastart.py index` scans the desktop entries and asks pacman for owner, install date, size and install reason. A package listed in Omarchy's own package lists, or installed as a dependency, counts as "Omarchy". Webapps are detected from `omarchy-launch-webapp` / `--app=`.
-- `backend/omastart.py track` runs as a child of the shell, listens to Hyprland's `openwindow` events and appends `{t, id}` to `~/.local/share/omastart/usage.jsonl`. This is how Recent and Top work for apps started from anywhere. Launching from the menu logs too, with de-duplication. History starts when you install; Linux keeps no earlier record. TUIs started outside the menu can't be told apart (their window class is just `TUI.float`/`TUI.tile`), so they are only counted when launched from omastart.
+- `backend/omapantry.py index` scans the desktop entries and asks pacman for owner, install date, size and install reason. A package listed in Omarchy's own package lists, or installed as a dependency, counts as "Omarchy". Webapps are detected from `omarchy-launch-webapp` / `--app=`.
+- `backend/omapantry.py track` runs as a child of the shell, listens to Hyprland's `openwindow` events and appends `{t, id}` to `~/.local/share/omapantry/usage.jsonl`. This is how Recent and Top work for apps started from anywhere. Launching from the menu logs too, with de-duplication. History starts when you install; Linux keeps no earlier record. TUIs started outside the menu can't be told apart (their window class is just `TUI.float`/`TUI.tile`), so they are only counted when launched from omapantry.
 - `Panel.qml` renders it.
 
 ## Install / undo
@@ -20,7 +20,7 @@ Colors, borders, fonts and corner radius all come from the shell's theme tokens,
 ./install.sh               # symlink into ~/.config/omarchy/plugins and add to the bar
 ./install.sh --no-enable   # symlink only
 ./uninstall.sh             # remove from bar, unlink, stop tracker (keeps usage history)
-./uninstall.sh --purge     # also delete ~/.local/share/omastart and ~/.cache/omastart
+./uninstall.sh --purge     # also delete ~/.local/share/omapantry and ~/.cache/omapantry
 ```
 
-`install.sh` saves `~/.config/omarchy/shell.json.pre-omastart` the first time it runs. Optional keybinding: `omarchy-shell mnx.omastart toggle`.
+`install.sh` saves `~/.config/omarchy/shell.json.pre-omapantry` the first time it runs. Optional keybinding: `omarchy-shell mnx.omapantry toggle`.

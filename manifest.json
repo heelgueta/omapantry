@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "mnx.omastart",
-  "name": "Omastart",
+  "id": "mnx.omapantry",
+  "name": "Omapantry",
   "version": "0.1.0",
   "author": "mnx",
   "license": "MIT",
@@ -13,7 +13,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Omastart",
+    "displayName": "Omapantry",
     "description": "Start-menu style app browser with recent / top / A-Z / newest / size / groups / unused views",
     "category": "System",
     "allowMultiple": false,

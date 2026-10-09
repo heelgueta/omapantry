@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""omastart backend: app index, launcher and Hyprland usage tracker.
+"""omapantry backend: app index, launcher and Hyprland usage tracker.
 
-  omastart.py index            print every launchable app as JSON
-  omastart.py launch <id>      record a launch and start the app
-  omastart.py track            long-running: log app windows opened in Hyprland
+  omapantry.py index            print every launchable app as JSON
+  omapantry.py launch <id>      record a launch and start the app
+  omapantry.py track            long-running: log app windows opened in Hyprland
 
-Usage data is an append-only log at ~/.local/share/omastart/usage.jsonl
+Usage data is an append-only log at ~/.local/share/omapantry/usage.jsonl
 (one {"t": epoch, "id": desktop-id, "src": "menu"|"window"} per line).
 Delete that file to reset history. Nothing else is written outside this repo.
 """
@@ -23,8 +23,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 HOME = Path.home()
-DATA_DIR = HOME / ".local/share/omastart"
-CACHE_DIR = HOME / ".cache/omastart"
+DATA_DIR = HOME / ".local/share/omapantry"
+CACHE_DIR = HOME / ".cache/omapantry"
 USAGE = DATA_DIR / "usage.jsonl"
 OMARCHY_PATH = Path(os.environ.get("OMARCHY_PATH", "/usr/share/omarchy"))
 DEDUP_SECONDS = 8

@@ -5,12 +5,12 @@ import Quickshell.Io
 import qs.Ui
 import qs.Commons
 
-// Omastart: a start-menu-ish popup for the bar. All data comes from
-// backend/omastart.py; this file only renders it with the shell's theme tokens.
+// Omapantry: a start-menu-ish popup for the bar. All data comes from
+// backend/omapantry.py; this file only renders it with the shell's theme tokens.
 Panel {
   id: root
-  moduleName: "mnx.omastart"
-  ipcTarget: "mnx.omastart"
+  moduleName: "mnx.omapantry"
+  ipcTarget: "mnx.omapantry"
   manageIpc: true
 
   // ---- theme ---------------------------------------------------------------
@@ -19,7 +19,7 @@ Panel {
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : ""
 
   // ---- state ---------------------------------------------------------------
-  readonly property string backend: decodeURIComponent(Qt.resolvedUrl("backend/omastart.py").toString().replace("file://", ""))
+  readonly property string backend: decodeURIComponent(Qt.resolvedUrl("backend/omapantry.py").toString().replace("file://", ""))
   property var apps: []
   property var rows: []
   property int selectedIndex: -1
@@ -246,7 +246,7 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        try { root.apps = JSON.parse(text) } catch (e) { console.warn("omastart: bad index output") }
+        try { root.apps = JSON.parse(text) } catch (e) { console.warn("omapantry: bad index output") }
       }
     }
   }
