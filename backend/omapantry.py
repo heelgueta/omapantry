@@ -461,29 +461,63 @@ def web_key(url):
     return host + "_" + (u.path or "/").replace("/", "_").lower() if host else ""
 
 
+WRAPPERS = {"env", "uwsm-app", "--", "setsid", "gtk-launch", "xdg-terminal-exec", "sh", "bash",
+            "zsh", "-c", "-e", "exec", "omarchy-launch-webapp"}
+
+
 def script_webapp_url(cmd):
-    """A launcher whose Exec is a small user script that ends in omarchy-launch-webapp <url>."""
-    exe = shlex.split(re.sub(r"%[a-zA-Z]", "", cmd) or "x")[0] if cmd.strip() else ""
+    """A launcher whose Exec is a small user script ending in omarchy-launch-webapp <url|$VAR>."""
     try:
+        exe = shlex.split(re.sub(r"%[a-zA-Z]", "", cmd))[0]
         p = Path(exe)
-        if p.is_file() and p.stat().st_size < 65536 and p.stat().st_uid == os.getuid():
-            m = re.search(r"omarchy-launch-webapp\s+[\"']?(https?://[^\s\"']+)", p.read_text(errors="ignore"))
-            return m.group(1) if m else ""
-    except (OSError, ValueError):
-        pass
-    return ""
+        if not (p.is_file() and p.stat().st_size < 65536 and p.stat().st_uid == os.getuid()):
+            return ""
+        text = p.read_text(errors="ignore")
+    except (OSError, ValueError, IndexError):
+        return ""
+    vars_ = dict(re.findall(r"^\s*(?:export\s+)?(\w+)=[\"']?(https?://[^\s\"']+)", text, re.M))
+    m = re.search(r"omarchy-launch-webapp\s+[\"']?(?:(https?://[^\s\"']+)|\$\{?(\w+)\}?)", text)
+    if not m:
+        return ""
+    return m.group(1) or vars_.get(m.group(2), "")
+
+
+def exec_tokens(cmd):
+    """Meaningful program names in an Exec line (wrappers and flags removed), for matching a
+    window's process command line. `bash -c "dua i /"` contributes `dua`."""
+    out = set()
+    try:
+        parts = shlex.split(re.sub(r"%[a-zA-Z]", "", cmd))
+    except ValueError:
+        parts = cmd.split()
+    for part in parts:
+        for tok in (shlex.split(part) if " " in part else [part]):
+            if tok.startswith("-") or "=" in tok.split("/")[0] or tok in WRAPPERS:
+                continue
+            base = os.path.basename(tok)
+            if len(base) > 1 and base not in WRAPPERS:
+                out.update({tok, base})
+    return out
 
 
 def class_map():
-    """window class / web key -> app id; "web:<key>" -> [app ids]; "name:<id>" -> display name."""
+    """"cls:<class>" and "web:<key>" -> [app ids]; "exec:<id>" -> tokens; "name:<id>" -> name."""
     m = {}
     for app_id, _p, _b, e in scan():
+        cmd = e["Exec"]
         m["name:" + app_id] = e.get("Name", "")
-        for key in {app_id.lower(), e.get("StartupWMClass", "").lower(),
-                    exec_basename(e["Exec"]).lower()}:
-            if key and key not in GENERIC_KEYS:
-                m.setdefault(key, app_id)
-        url = webapp_url(e["Exec"]) or script_webapp_url(e["Exec"])
+        m["exec:" + app_id] = exec_tokens(cmd)
+        prog = exec_basename(cmd).lower()
+        if prog and prog not in GENERIC_KEYS:
+            m.setdefault("bin:" + prog, []).append(app_id)
+        keys = {app_id.lower(), e.get("StartupWMClass", "").lower(), exec_basename(cmd).lower()}
+        mm = re.search(r"--app-id=(\S+)", cmd)  # terminal TUIs: the app-id becomes the class
+        if mm:
+            keys.add(mm.group(1).strip("'\"").lower())
+        for key in keys:
+            if key and key not in GENERIC_KEYS and app_id not in m.setdefault("cls:" + key, []):
+                m["cls:" + key].append(app_id)
+        url = webapp_url(cmd) or script_webapp_url(cmd)
         key = web_key(url) if url else ""
         if key:
             m.setdefault("web:" + key, []).append(app_id)
@@ -491,10 +525,10 @@ def class_map():
 
 
 def match_class(cmap, window_class):
-    """-> list of candidate app ids (empty if unknown, several if webapps share a class)."""
+    """-> list of candidate app ids (empty if unknown, several if windows can't be told apart)."""
     c = window_class.lower()
-    if c in cmap and not c.startswith(("web:", "name:")):
-        return [cmap[c]]
+    if "cls:" + c in cmap:
+        return list(cmap["cls:" + c])
     m = CHROMIUM_CLASS.match(c)
     if not m:
         return []
@@ -517,6 +551,64 @@ def match_class(cmap, window_class):
         top = max(len(x[0]) for x in best)
         return [i for x in best if len(x[0]) == top for i in x[1]]
     return [i for x in same for i in x[1]] if len(same) == 1 else []
+
+
+def window_pid(addr):
+    """pid of a Hyprland window by address (event addresses have no 0x prefix)."""
+    try:
+        out = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=3).stdout
+        want = addr if addr.startswith("0x") else "0x" + addr
+        return next((c["pid"] for c in json.loads(out) if c.get("address") == want), None)
+    except Exception:
+        return None
+
+
+TERMINALS = {"foot", "footclient", "alacritty", "kitty", "ghostty", "xterm", "wezterm"}
+INTERPRETERS = {"python", "python3", "bash", "sh", "node", "ruby", "perl", "java", "electron"}
+
+
+def same_program(cmap, ids):
+    """True when `ids` are one launcher or several launchers for the same program (foot / foot-server)."""
+    return bool(ids) and len({frozenset(cmap.get("exec:" + i, ())) for i in ids}) == 1
+
+
+def process_args(pid):
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="ignore")
+    except (OSError, TypeError):
+        return []
+    return [a for a in raw.split("\0") if a]
+
+
+def program_name(args):
+    """The program behind a command line, skipping interpreters and flags."""
+    for a in args:
+        base = os.path.basename(a).lower()
+        if base not in INTERPRETERS and not a.startswith("-"):
+            return base
+    return ""
+
+
+def pid_pick(cmap, cands, pid):
+    """Decide a native window by the program running behind it.
+    1. a class candidate whose program is in the process command line wins (uniquely);
+    2. otherwise an app whose program *is* the process wins (class said X, process is Y:
+       e.g. varwiz-gui's window class is `varwiz`, the same as its TUI launcher);
+    3. otherwise the lone class candidate, if there is exactly one."""
+    args = process_args(pid)
+    if args:
+        have = set(args) | {os.path.basename(a) for a in args}
+        score = {i: len(cmap.get("exec:" + i, set()) & have) for i in cands}
+        top = max(score.values(), default=0)
+        winners = [i for i, v in score.items() if v == top]
+        if top > 0 and same_program(cmap, winners):
+            return winners[0]
+        prog = program_name(args)
+        if prog and prog not in TERMINALS:
+            alt = cmap.get("bin:" + prog, [])
+            if len(alt) == 1:
+                return alt[0]
+    return cands[0] if same_program(cmap, cands) else None
 
 
 def recent_menu_launch(ids, within=30):
@@ -553,11 +645,30 @@ def title_pick(cmap, cands, title):
     return winners[0] if top > 0 and len(winners) == 1 else None
 
 
-def resolve(cmap, cands, title):
-    """One app id for a window, or None when it can't be told apart (log nothing, never guess)."""
-    if len(cands) == 1:
+def resolve(cmap, cands, title, addr="", webapp=False):
+    """One app id for a window, or None when it can't be told apart (log nothing, never guess).
+    Native windows: the process behind the window decides (see pid_pick).
+    Browser app windows share the browser's pid, so: unique candidate, then a recent
+    menu launch, then the window title."""
+    if not webapp and addr:
+        pid = window_pid(addr)
+        if pid:
+            got = pid_pick(cmap, cands, pid)
+            if got:
+                return got
+    if same_program(cmap, cands):
         return cands[0]
     return recent_menu_launch(set(cands)) or (title_pick(cmap, cands, title) if title else None)
+
+
+def apps_signature():
+    sig = []
+    for d in data_dirs():
+        try:
+            sig.append((str(d), d.stat().st_mtime))
+        except OSError:
+            pass
+    return tuple(sig)
 
 
 def die_with_parent():
@@ -580,7 +691,7 @@ def track():
     runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.connect(f"{runtime}/hypr/{sig}/.socket2.sock")
-    cmap, built, misses = class_map(), time.time(), {}
+    cmap, built, misses, sig = class_map(), time.time(), {}, apps_signature()
     pending = {}  # window address -> (candidate ids, deadline): waiting for its title
     buf = b""
     while True:
@@ -592,12 +703,12 @@ def track():
         for raw in lines:
             line = raw.decode(errors="ignore")
             now = time.time()
-            for addr in [a for a, (_c, dl) in pending.items() if dl < now]:
+            for addr in [a for a, (_c, dl, _w) in pending.items() if dl < now]:
                 del pending[addr]
             if line.startswith("windowtitlev2>>"):
                 addr, _, title = line[len("windowtitlev2>>"):].partition(",")
                 if addr in pending:
-                    app_id = resolve(cmap, pending[addr][0], title)
+                    app_id = resolve(cmap, pending[addr][0], title, addr, pending[addr][2])
                     if app_id:
                         del pending[addr]
                         log_usage(app_id, "window")
@@ -609,18 +720,25 @@ def track():
                 continue
             addr, wclass = parts[0], parts[2]
             title = parts[3] if len(parts) > 3 else ""
+            if now - built > 5 and apps_signature() != sig:
+                cmap, built, sig = class_map(), now, apps_signature()  # launchers added/removed
             cands = match_class(cmap, wclass)
             if not cands and now - built > 60 and now - misses.get(wclass, 0) > 60:
                 misses[wclass] = now
-                cmap, built = class_map(), now  # app may have just been installed
+                cmap, built, sig = class_map(), now, apps_signature()
                 cands = match_class(cmap, wclass)
+            webapp = bool(CHROMIUM_CLASS.match(wclass.lower()))
+            if not cands and not webapp:  # unknown class: the program itself may be a known app
+                prog = program_name(process_args(window_pid(addr)))
+                alt = cmap.get("bin:" + prog, []) if prog and prog not in TERMINALS else []
+                cands = alt if len(alt) == 1 else []
             if not cands:
                 continue
-            app_id = resolve(cmap, cands, title)
+            app_id = resolve(cmap, cands, title, addr, webapp)
             if app_id:
                 log_usage(app_id, "window")
             else:
-                pending[addr] = (cands, now + 20)  # title usually arrives a moment later
+                pending[addr] = (cands, now + 20, webapp)  # title usually arrives a moment later
 
 
 def main():
