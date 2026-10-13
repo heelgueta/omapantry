@@ -301,6 +301,7 @@ Panel {
   }
   Timer { id: trackerRestart; interval: 30000; onTriggered: tracker.running = true }
 
+  Component.onCompleted: reload()
 
   // ---- bar button ----------------------------------------------------------
   implicitWidth: button.implicitWidth
