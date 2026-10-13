@@ -3,11 +3,13 @@
 
   omapantry.py index            print every launchable app as JSON
   omapantry.py launch <id>      record a launch and start the app
+  omapantry.py edit <id> <name> [url]   rename a user launcher / change a webapp URL
   omapantry.py track            long-running: log app windows opened in Hyprland
 
 Usage data is an append-only log at ~/.local/share/omapantry/usage.jsonl
 (one {"t": epoch, "id": desktop-id, "src": "menu"|"window"} per line).
-Delete that file to reset history. Nothing else is written outside this repo.
+Delete that file to reset history. The only other thing written is a user launcher
+you explicitly edit; its original is first copied to ~/.local/share/omapantry/backups/.
 """
 import configparser
 import fcntl
@@ -383,8 +385,54 @@ def build_index():
             "wmclass": e.get("StartupWMClass", ""),
             "exec": exec_basename(cmd),
             "path": str(path),
+            # Only plain files in the user's own applications dir may be edited.
+            "editable": base == USER_APPS and not path.is_symlink(),
         })
     return apps
+
+
+# -------------------------------------------------------------------- edit
+
+URL_OK = re.compile(r"^https?://[^\s\"'`$%;|&<>\\]+$")
+
+
+def edit(app_id, name, url):
+    """Rename a user launcher and/or change a webapp's URL. Prints 'ok' or an error."""
+    name = name.strip()
+    if not name or "\n" in name or "\r" in name:
+        return "Name can't be empty"
+    target = next((p for i, p, b, _e in scan() if i == app_id and b == USER_APPS), None)
+    if target is None or target.is_symlink():
+        return "That launcher isn't editable (system app or symlink)"
+    text = target.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    in_entry, out, saw_name = False, [], False
+    for line in lines:
+        if line.startswith("["):
+            in_entry = line.strip() == "[Desktop Entry]"
+        if in_entry and line.startswith("Name="):
+            line, saw_name = "Name=" + name, True
+        elif in_entry and line.startswith("Exec=") and url is not None:
+            old = webapp_url(line[5:])
+            if not old:
+                return "This launcher isn't a webapp, so it has no URL to change"
+            if not URL_OK.match(url):
+                return "URL must start with http:// or https:// and contain no spaces or quotes"
+            line = line.replace(old, url, 1)
+        out.append(line)
+    if not saw_name:
+        return "No Name= line found in the launcher"
+
+    # Keep a copy of the original, then replace the file atomically.
+    private_dir(DATA_DIR / "backups")
+    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 1000000:06d}"
+    with private_open(DATA_DIR / "backups" / f"{target.name}.{stamp}", os.O_WRONLY | os.O_TRUNC, "w") as fh:
+        fh.write(text)
+    tmp = target.with_name(target.name + ".omapantry-tmp")
+    tmp.write_text("\n".join(out), encoding="utf-8")
+    os.chmod(tmp, target.stat().st_mode & 0o777)
+    os.replace(tmp, target)
+    return "ok"
 
 
 # ------------------------------------------------------------------ launch
@@ -398,34 +446,118 @@ def launch(app_id):
 
 # ------------------------------------------------------------------ tracker
 
+# Chromium names an --app window class "<browser>-<host>_<path, / -> _>-<profile>",
+# e.g. chrome-mail.google.com__mail_u_1_-Default. The port and fragment are dropped,
+# so two webapps can legitimately share one class (all localhost apps do).
+CHROMIUM_CLASS = re.compile(
+    r"^(?:chrome|chromium|brave(?:-browser)?|google-chrome|msedge|microsoft-edge|helium|vivaldi|opera)"
+    r"-(.+)-(?:default|profile[ _]\d+)$")
+GENERIC_KEYS = ("sh", "bash", "env", "xdg-terminal-exec", "omarchy-launch-webapp")
+
+
+def web_key(url):
+    u = urlparse(url)
+    host = (u.hostname or "").lower()
+    return host + "_" + (u.path or "/").replace("/", "_").lower() if host else ""
+
+
+def script_webapp_url(cmd):
+    """A launcher whose Exec is a small user script that ends in omarchy-launch-webapp <url>."""
+    exe = shlex.split(re.sub(r"%[a-zA-Z]", "", cmd) or "x")[0] if cmd.strip() else ""
+    try:
+        p = Path(exe)
+        if p.is_file() and p.stat().st_size < 65536 and p.stat().st_uid == os.getuid():
+            m = re.search(r"omarchy-launch-webapp\s+[\"']?(https?://[^\s\"']+)", p.read_text(errors="ignore"))
+            return m.group(1) if m else ""
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
 def class_map():
+    """window class / web key -> app id; "web:<key>" -> [app ids]; "name:<id>" -> display name."""
     m = {}
     for app_id, _p, _b, e in scan():
+        m["name:" + app_id] = e.get("Name", "")
         for key in {app_id.lower(), e.get("StartupWMClass", "").lower(),
                     exec_basename(e["Exec"]).lower()}:
-            if key and key not in ("sh", "bash", "env", "xdg-terminal-exec", "omarchy-launch-webapp"):
+            if key and key not in GENERIC_KEYS:
                 m.setdefault(key, app_id)
-        url = webapp_url(e["Exec"])
-        if url:
-            host = urlparse(url).netloc
-            if host:
-                m["web:" + host.lower()] = app_id
+        url = webapp_url(e["Exec"]) or script_webapp_url(e["Exec"])
+        key = web_key(url) if url else ""
+        if key:
+            m.setdefault("web:" + key, []).append(app_id)
     return m
 
 
 def match_class(cmap, window_class):
+    """-> list of candidate app ids (empty if unknown, several if webapps share a class)."""
     c = window_class.lower()
-    if c in cmap:
-        return cmap[c]
-    # Chromium --app windows: chrome-<host>__<path>-Default (or brave-/chromium-)
-    m = re.match(r"^(?:chrome|chromium|brave|google-chrome|msedge|helium|vivaldi)-(.+?)__", c)
-    if m:
-        host = m.group(1)
-        for key, val in cmap.items():
-            if key.startswith("web:") and (key[4:] == host or key[4:].endswith("." + host)
-                                           or host.endswith(key[4:])):
-                return val
+    if c in cmap and not c.startswith(("web:", "name:")):
+        return [cmap[c]]
+    m = CHROMIUM_CLASS.match(c)
+    if not m:
+        return []
+    key = m.group(1)
+    if "web:" + key in cmap:
+        return list(cmap["web:" + key])
+    # Tolerate www./subdomain differences: same host, then closest path.
+    host, _, path = key.partition("_")
+    same = []
+    for k, ids in cmap.items():
+        if not k.startswith("web:"):
+            continue
+        h, _, pth = k[4:].partition("_")
+        if h == host or h.endswith("." + host) or host.endswith("." + h):
+            same.append((pth, ids))
+    if not same:
+        return []
+    best = [x for x in same if path.startswith(x[0])]
+    if best:
+        top = max(len(x[0]) for x in best)
+        return [i for x in best if len(x[0]) == top for i in x[1]]
+    return [i for x in same for i in x[1]] if len(same) == 1 else []
+
+
+def recent_menu_launch(ids, within=30):
+    """Most recent menu launch of one of `ids` in the last `within` seconds, else None."""
+    now = time.time()
+    try:
+        with open(USAGE, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 8192))
+            lines = fh.read().decode(errors="ignore").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if now - e.get("t", 0) > within:
+            break
+        if e.get("src") == "menu" and e.get("id") in ids:
+            return e["id"]
     return None
+
+
+def title_pick(cmap, cands, title):
+    """Pick the candidate whose distinctive name words appear in the window title."""
+    toks = {i: {w for w in re.findall(r"[a-z0-9]{3,}", cmap.get("name:" + i, "").lower())}
+            for i in cands}
+    common = set.intersection(*toks.values()) if toks else set()
+    t = title.lower()
+    score = {i: sum(1 for w in ws - common if w in t) for i, ws in toks.items()}
+    top = max(score.values(), default=0)
+    winners = [i for i, v in score.items() if v == top]
+    return winners[0] if top > 0 and len(winners) == 1 else None
+
+
+def resolve(cmap, cands, title):
+    """One app id for a window, or None when it can't be told apart (log nothing, never guess)."""
+    if len(cands) == 1:
+        return cands[0]
+    return recent_menu_launch(set(cands)) or (title_pick(cmap, cands, title) if title else None)
 
 
 def die_with_parent():
@@ -449,6 +581,7 @@ def track():
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.connect(f"{runtime}/hypr/{sig}/.socket2.sock")
     cmap, built, misses = class_map(), time.time(), {}
+    pending = {}  # window address -> (candidate ids, deadline): waiting for its title
     buf = b""
     while True:
         chunk = sock.recv(4096)
@@ -458,19 +591,36 @@ def track():
         *lines, buf = buf.split(b"\n")
         for raw in lines:
             line = raw.decode(errors="ignore")
+            now = time.time()
+            for addr in [a for a, (_c, dl) in pending.items() if dl < now]:
+                del pending[addr]
+            if line.startswith("windowtitlev2>>"):
+                addr, _, title = line[len("windowtitlev2>>"):].partition(",")
+                if addr in pending:
+                    app_id = resolve(cmap, pending[addr][0], title)
+                    if app_id:
+                        del pending[addr]
+                        log_usage(app_id, "window")
+                continue
             if not line.startswith("openwindow>>"):
                 continue
             parts = line[len("openwindow>>"):].split(",", 3)
             if len(parts) < 3:
                 continue
-            wclass = parts[2]
-            app_id = match_class(cmap, wclass)
-            if not app_id and time.time() - built > 60 and time.time() - misses.get(wclass, 0) > 60:
-                misses[wclass] = time.time()
-                cmap, built = class_map(), time.time()  # app may have just been installed
-                app_id = match_class(cmap, wclass)
+            addr, wclass = parts[0], parts[2]
+            title = parts[3] if len(parts) > 3 else ""
+            cands = match_class(cmap, wclass)
+            if not cands and now - built > 60 and now - misses.get(wclass, 0) > 60:
+                misses[wclass] = now
+                cmap, built = class_map(), now  # app may have just been installed
+                cands = match_class(cmap, wclass)
+            if not cands:
+                continue
+            app_id = resolve(cmap, cands, title)
             if app_id:
                 log_usage(app_id, "window")
+            else:
+                pending[addr] = (cands, now + 20)  # title usually arrives a moment later
 
 
 def main():
@@ -480,6 +630,10 @@ def main():
         json.dump(build_index(), sys.stdout)
     elif cmd == "launch" and len(sys.argv) > 2:
         launch(sys.argv[2])
+    elif cmd == "edit" and len(sys.argv) >= 4:
+        result = edit(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
+        print(result)
+        sys.exit(0 if result == "ok" else 1)
     elif cmd == "track":
         track()
     else:

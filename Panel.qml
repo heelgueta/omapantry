@@ -226,7 +226,47 @@ Panel {
     Quickshell.execDetached(["python3", root.backend, "launch", a.id])
   }
 
+  // ---- editing (your own launchers only) -----------------------------------
+  property var editing: null
+  property string editError: ""
+
+  function startEdit(a) {
+    if (!a || !a.editable) return
+    editError = ""
+    editing = a
+    nameField.text = a.name
+    urlField.text = a.url
+    Qt.callLater(function() { nameField.forceActiveFocus(); nameField.selectAll() })
+  }
+
+  function cancelEdit() {
+    editing = null
+    editError = ""
+    search.forceActiveFocus()
+  }
+
+  function saveEdit() {
+    if (!editing || saver.running) return
+    var cmd = ["python3", root.backend, "edit", editing.id, nameField.text]
+    if (editing.kind === "web") cmd.push(urlField.text)
+    saver.command = cmd
+    saver.running = true
+  }
+
+  Process {
+    id: saver
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var msg = text.trim()
+        if (msg === "ok") { root.cancelEdit(); root.reload() }
+        else root.editError = msg || "Couldn't save"
+      }
+    }
+  }
+
   onOpenedChanged: {
+    if (!opened) editing = null
     if (opened) {
       query = ""
       kindFilter = "all"
@@ -261,7 +301,6 @@ Panel {
   }
   Timer { id: trackerRestart; interval: 30000; onTriggered: tracker.running = true }
 
-  Component.onCompleted: reload()
 
   // ---- bar button ----------------------------------------------------------
   implicitWidth: button.implicitWidth
@@ -327,7 +366,17 @@ Panel {
       Keys.priority: Keys.BeforeItem
       Keys.onPressed: function(event) {
         var k = event.key
-        if (k === Qt.Key_Escape) {
+        if (root.editing) {
+          // The editor owns the keyboard; only Esc/Enter are ours, Tab moves between fields.
+          if (k === Qt.Key_Escape) root.cancelEdit()
+          else if (k === Qt.Key_Return || k === Qt.Key_Enter) root.saveEdit()
+          else { event.accepted = false; return }
+          event.accepted = true
+          return
+        }
+        if (k === Qt.Key_E && (event.modifiers & Qt.ControlModifier)) {
+          root.startEdit(root.selected)
+        } else if (k === Qt.Key_Escape) {
           if (root.query !== "") search.text = ""
           else root.close()
         } else if (k === Qt.Key_Down) root.move(1)
@@ -340,6 +389,103 @@ Panel {
         else if ((k === Qt.Key_Left || k === Qt.Key_Right) && search.text === "") root.cycleTab(k === Qt.Key_Right ? 1 : -1)
         else { event.accepted = false; return }
         event.accepted = true
+      }
+
+      // Inline editor for your own launchers (name, and URL for webapps)
+      Rectangle {
+        id: editor
+        anchors.fill: parent
+        visible: root.editing !== null
+        z: 10
+        color: Color.popups.background
+
+        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
+
+        Column {
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.topMargin: Style.space(8)
+          spacing: Style.space(10)
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+            text: root.editing ? "Edit " + root.editing.name : ""
+            color: root.fg
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: root.editing
+              ? "Changes " + root.editing.path.split("/").pop() + " in ~/.local/share/applications. "
+                + "The original is kept in ~/.local/share/omapantry/backups."
+              : ""
+            color: root.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            text: "NAME"
+            color: root.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.2
+          }
+          TextField {
+            id: nameField
+            width: parent.width
+            foreground: root.fg
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+
+          Text {
+            visible: root.editing !== null && root.editing.kind === "web"
+            textFormat: Text.PlainText
+            text: "URL"
+            color: root.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1.2
+          }
+          TextField {
+            id: urlField
+            visible: root.editing !== null && root.editing.kind === "web"
+            width: parent.width
+            foreground: root.fg
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            placeholderText: "https://…"
+          }
+
+          Text {
+            visible: root.editError !== ""
+            width: parent.width
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: root.editError
+            color: Color.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Row {
+            spacing: Style.space(6)
+            Chip { label: "Save  ⏎"; active: true; onClicked: root.saveEdit() }
+            Chip { label: "Cancel  Esc"; onClicked: root.cancelEdit() }
+          }
+        }
       }
 
       ColumnLayout {
@@ -547,7 +693,15 @@ Panel {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onPositionChanged: root.selectedIndex = row.index
-                onClicked: root.launch(row.app)
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: function(mouse) {
+                  if (mouse.button === Qt.RightButton) {
+                    root.selectedIndex = row.index
+                    root.startEdit(row.app)
+                  } else {
+                    root.launch(row.app)
+                  }
+                }
               }
             }
           }
@@ -575,6 +729,7 @@ Panel {
             elide: Text.ElideRight
             text: root.selected
               ? root.selected.name + "  ·  " + (root.selected.origin === "yours" ? "installed by you" : "Omarchy / system")
+                + (root.selected.editable ? "  ·  Ctrl+E or right-click to edit" : "")
               : " "
             color: root.fg
             font.family: root.fontFamily

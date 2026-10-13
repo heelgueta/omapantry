@@ -8,6 +8,8 @@ A tiny start menu for the Omarchy bar. Click the apps icon (right after the Omar
 **Filters:** All / Apps / Web / TUI, plus **Mine** (installed by you, your webapps, custom launchers) vs **Omarchy** (shipped with Omarchy or pulled in as dependencies).
 **Search** is always live and overrides the view. ↑/↓ move, Enter launches, Esc clears the search and then closes.
 
+**Editing:** right-click a row (or press Ctrl+E) on one of *your own* launchers (webapps, custom launchers in `~/.local/share/applications`) to rename it or, for webapps, change its URL. System apps and symlinked launchers are never editable. The URL must be `http(s)://` with no spaces or quotes.
+
 Colors, borders, fonts and corner radius all come from the shell's theme tokens, so it follows `omarchy theme set`.
 
 ## Install
@@ -29,11 +31,15 @@ No sudo, no install hooks, no network access.
 
 Everything stays on your machine. The tracker only records which app launched and when
 (`~/.local/share/omapantry/usage.jsonl`); nothing is sent anywhere. `./uninstall.sh --purge` deletes it.
+The only file outside its own data that omapantry ever writes is a launcher you explicitly edit,
+and only after saving the original to `~/.local/share/omapantry/backups/` (restore by copying it back).
 
 ## How it works
 
-- `backend/omapantry.py index` scans the desktop entries and asks pacman for owner, install date, size and install reason. A package listed in Omarchy's own package lists, or installed as a dependency, counts as "Omarchy". Webapps are detected from `omarchy-launch-webapp` / `--app=`.
+- `backend/omapantry.py index` scans the desktop entries and asks pacman for owner, install date, size and install reason. A package listed in Omarchy's own package lists, or installed as a dependency, counts as "Omarchy". Webapps are detected from `omarchy-launch-webapp` / `--app=`. A launcher whose Exec is a small script of yours ending in `omarchy-launch-webapp <url>` is tracked as that webapp too.
 - `backend/omapantry.py track` runs as a child of the shell, listens to Hyprland's `openwindow` events and appends `{t, id}` to `~/.local/share/omapantry/usage.jsonl`. This is how Recent and Top work for apps started from anywhere. Launching from the menu logs too, with de-duplication. History starts when you install; Linux keeps no earlier record. TUIs started outside the menu can't be told apart (their window class is just `TUI.float`/`TUI.tile`), so they are only counted when launched from omapantry.
+- **Webapp windows** are matched by the class Chromium gives them (`<browser>-<host>_<path>-<profile>`, port and `#fragment` dropped), so webapps on the same host, such as two Gmail accounts or two Drive folders, are told apart by path. Apps that Chromium gives an identical class (every `localhost` webapp) are resolved by a menu launch in the last 30 s, then by the window title. If that can't decide, nothing is logged rather than guessing.
+- `backend/omapantry.py edit <id> <name> [url]` backs the editor: it only touches plain files in `~/.local/share/applications`, validates the URL, saves the original first, and replaces the file atomically.
 - `Panel.qml` renders it.
 
 ## Install from a checkout / undo
